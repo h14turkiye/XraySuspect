@@ -1,0 +1,5 @@
+main: com.h14turkiye.xraysuspect.XraySuspect
+version: 0.1.0
+api-version: 1.13
+author: h14turkiye
+name: XraySuspect

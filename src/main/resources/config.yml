@@ -1,0 +1,16 @@
+veins:
+  diamond_ore: 1
+  coal_ore: 3
+  iron_ore: 2
+  gold_ore: 1
+  emerald_ore: 1
+  lapis_ore: 2
+  redstone_ore: 2
+  copper_ore: 2
+
+permission:
+  revoke_command: "/lp user %player% permission set paper.antixray.bypass false"
+  give_command: "/lp user %player% permission set paper.antixray.bypass true"
+  give_delay_ticks: 1200 # 20 minutes in ticks
+
+refresh-chunks: true
