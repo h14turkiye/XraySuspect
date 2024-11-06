@@ -1,7 +1,6 @@
 package com.h14turkiye.xraysuspect.listener;
 
 import org.bukkit.Bukkit;
-import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -21,84 +20,72 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BlockBreakListener implements Listener {
     
     private final Plugin plugin;
-    private final Map<Player, Location> playerLastLocation = new ConcurrentHashMap<>();
-    private final Map<Player, Map<String, Integer>> playerVeinCounts = new ConcurrentHashMap<>();
-    private final Map<Player, Long> lastInteractionTimes = new ConcurrentHashMap<>();
-    private static final int DISTANCE_SQUARED_THRESHOLD = 256; // 16 blocks squared
+    private final Map<Player, Location> playerLastMineLocation = new ConcurrentHashMap<>();
+    private final Map<Player, Map<String, Integer>> playerOreCounts = new ConcurrentHashMap<>();
+    private final Map<Player, Long> lastMiningTimes = new ConcurrentHashMap<>();
     
-    private final Set<String> veinKeys;
-    private final String giveCommand;
-    private final String revokeCommand;
-    private final int giveDelay;
-    private final boolean refreshChunks;
-    private final int resetCountInactivityDelay;
+    private final Set<String> oreTypes;
+    private final String permissionGrantCommand;
+    private final String permissionRevokeCommand;
+    private final int permissionGrantDelay;
+    private final boolean refreshChunkPackets;
+    private final int resetOreCountDelay;
+    private static final int LOCATION_SQUARED_THRESHOLD = 256;
     
     public BlockBreakListener(Plugin plugin) {
         this.plugin = plugin;
-        
-        // Caching configuration values
-        this.veinKeys = plugin.getConfig().getConfigurationSection("veins").getKeys(false);
-        this.giveCommand = plugin.getConfig().getString("permission.command.give");
-        this.revokeCommand = plugin.getConfig().getString("permission.command.revoke");
-        this.giveDelay = plugin.getConfig().getInt("suspect-phase-time");
-        this.refreshChunks = plugin.getConfig().getBoolean("refresh-chunks");
-        this.resetCountInactivityDelay = plugin.getConfig().getInt("reset-count-inactivity-delay", 600);
-        
+        this.oreTypes = plugin.getConfig().getConfigurationSection("ores").getKeys(false);
+        this.permissionGrantCommand = plugin.getConfig().getString("permission.command.give");
+        this.permissionRevokeCommand = plugin.getConfig().getString("permission.command.revoke");
+        this.permissionGrantDelay = plugin.getConfig().getInt("suspect-phase-time");
+        this.refreshChunkPackets = plugin.getConfig().getBoolean("refresh-chunks");
+        this.resetOreCountDelay = plugin.getConfig().getInt("reset-count-inactivity-delay", 600);
         startInactivityResetTask();
     }
     
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, ()-> {
-            Player player = event.getPlayer();
-            if (player.hasPermission("paper.antixray.bypass")) return;
-            
-            Location currentLocation = event.getBlock().getLocation();
-            String blockTypeName = event.getBlock().getType().name().toLowerCase();
-            
-            // Check if the block broken is a recognized vein type
-            if (veinKeys.contains(blockTypeName)) {
-                // Initialize player's vein count if not already done
-                playerVeinCounts.putIfAbsent(player, new HashMap<>());
-                Map<String, Integer> veinCounts = playerVeinCounts.get(player);
-                
-                // Update last interaction time
-                lastInteractionTimes.put(player, System.currentTimeMillis());
-                
-                // Check if the player has moved significantly
-                Location lastLocation = playerLastLocation.get(player);
-                boolean movedSignificantly = lastLocation == null || hasMovedSignificantly(lastLocation, currentLocation);
-                
-                if (movedSignificantly) { 
-                    // Update vein count for the specific block type
-                    veinCounts.put(blockTypeName, veinCounts.getOrDefault(blockTypeName, 0) + 1);
-                    
-                    playerLastLocation.put(player, currentLocation);
-                    
-                    int veinLimit = plugin.getConfig().getInt("veins." + blockTypeName);
-                    if (veinCounts.get(blockTypeName) > veinLimit) {
-                        executeCommand(revokeCommand, player);
-                        
-                        // Schedule permission reapplication
-                        if (giveDelay > 0) {
-                            Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, () -> {
-                                if (player.isOnline()) {
-                                    executeCommand(giveCommand, player);
-                                }
-                            }, giveDelay);
-                        }
-                        
-                        if (refreshChunks) {
-                            resendNearbyChunks(player);
-                        }
-                    }
-                }
-            }
-        });
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> handleMining(event));
     }
     
-    private boolean hasMovedSignificantly(Location lastLocation, Location currentLocation) {
-        return (lastLocation.distanceSquared(currentLocation) > DISTANCE_SQUARED_THRESHOLD);
+    private void handleMining(BlockBreakEvent event) {
+        Player player = event.getPlayer();
+        
+        if (player.hasPermission("paper.antixray.bypass")) return;
+        
+        Location currentLocation = event.getBlock().getLocation();
+        String blockTypeName = event.getBlock().getType().name().toLowerCase();
+        
+        if (oreTypes.contains(blockTypeName)) {
+            updateOreCount(player, blockTypeName, currentLocation);
+        }
+    }
+    
+    private void updateOreCount(Player player, String blockTypeName, Location currentLocation) {
+        playerOreCounts.putIfAbsent(player, new HashMap<>());
+        Map<String, Integer> oreCounts = playerOreCounts.get(player);
+        lastMiningTimes.put(player, System.currentTimeMillis());
+        
+        if (hasPlayerMovedFromLastMineLocation(player, currentLocation)) {
+            incrementOreCount(player, blockTypeName, oreCounts);
+            playerLastMineLocation.put(player, currentLocation);
+        }
+    }
+    
+    private void incrementOreCount(Player player, String blockTypeName, Map<String, Integer> oreCounts) {
+        oreCounts.put(blockTypeName, oreCounts.getOrDefault(blockTypeName, 0) + 1);
+        
+        int oreLimit = plugin.getConfig().getInt("ores." + blockTypeName);
+        if (oreCounts.get(blockTypeName) > oreLimit) {
+            executeCommand(permissionRevokeCommand, player);
+            schedulePermissionRegrant(player);
+            if (refreshChunkPackets) resendNearbyChunks(player);
+        }
+    }
+    
+    private boolean hasPlayerMovedFromLastMineLocation(Player player, Location currentLocation) {
+        Location lastLocation = playerLastMineLocation.get(player);
+        return lastLocation == null || lastLocation.distanceSquared(currentLocation) > LOCATION_SQUARED_THRESHOLD;
     }
     
     private void executeCommand(String commandTemplate, Player player) {
@@ -108,41 +95,50 @@ public class BlockBreakListener implements Listener {
         }
     }
     
+    private void schedulePermissionRegrant(Player player) {
+        if (permissionGrantDelay > 0) {
+            Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, () -> {
+                if (player.isOnline()) {
+                    executeCommand(permissionGrantCommand, player);
+                }
+            }, permissionGrantDelay);
+        }
+    }
+    
     private void resendNearbyChunks(Player player) {
-        Set<Chunk> nearbyChunks = ChunkUtils.getPlayerChunks(player);
-        for (Chunk chunk : nearbyChunks) {
+        ChunkUtils.getPlayerChunks(player).forEach(chunk -> {
             Object chunkPacket = PacketManager.createChunkPacket(player, chunk);
             if (chunkPacket != null) {
                 PacketManager.sendPacket(player, chunkPacket);
             }
-        }
+        });
     }
     
     private void startInactivityResetTask() {
-        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::resetInactivePlayers, 0L, 20L * 60); // Run every minute
+        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::resetInactivePlayers, 0L, 20L * 60);
     }
     
     private void resetInactivePlayers() {
         long currentTime = System.currentTimeMillis();
-        
-        for (Map.Entry<Player, Long> entry : lastInteractionTimes.entrySet()) {
-            Player player = entry.getKey();
-            long lastInteractionTime = entry.getValue();
-            
-            if (currentTime - lastInteractionTime >= resetCountInactivityDelay * 50L) { // delay in ticks to milliseconds
-                playerVeinCounts.remove(player);
-                playerLastLocation.remove(player);
-                lastInteractionTimes.remove(player);
+        lastMiningTimes.forEach((player, lastTime) -> {
+            if (currentTime - lastTime >= resetOreCountDelay * 50L) {
+                playerOreCounts.remove(player);
+                playerLastMineLocation.remove(player);
+                lastMiningTimes.remove(player);
             }
-        }
+        });
     }
     
     @EventHandler
     public void onPlayerDisconnect(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        playerLastLocation.remove(player);
-        playerVeinCounts.remove(player);
-        lastInteractionTimes.remove(player);
-        executeCommand(giveCommand, player);
+        clearPlayerData(player);
+    }
+    
+    private void clearPlayerData(Player player) {
+        playerLastMineLocation.remove(player);
+        playerOreCounts.remove(player);
+        lastMiningTimes.remove(player);
+        executeCommand(permissionGrantCommand, player);
     }
 }

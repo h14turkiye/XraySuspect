@@ -1,6 +1,5 @@
 package com.h14turkiye.xraysuspect.packet;
 
-import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.entity.Player;
 
@@ -12,7 +11,7 @@ public class ChunkUtils {
     public static Set<Chunk> getPlayerChunks(Player player) {
         Set<Chunk> chunks = new HashSet<>();
         Chunk playerChunk = player.getLocation().getChunk();
-        int renderDistance = Bukkit.getServer().getViewDistance();
+        int renderDistance = player.getViewDistance();
         
         int startX = playerChunk.getX() - renderDistance;
         int startZ = playerChunk.getZ() - renderDistance;

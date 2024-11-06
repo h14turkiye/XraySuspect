@@ -35,4 +35,3 @@ Your contributions are welcome! If you’d like to suggest enhancements, report 
 ## Roadmap
 
 1. Create an optimized default configuration based on typical usage scenarios.
-2. Implement checks based on each player’s view distance rather than the server’s global view distance to reduce redundant data loading and improve compatibility with various client configurations.
